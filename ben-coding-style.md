@@ -103,30 +103,233 @@ class SendUserNotificationAction
 - **Debugging**: Easier to identify and fix issues in focused code
 - **Composability**: Multiple Actions can be orchestrated together when needed
 
-### 2. Domain-Driven Organization (DDD)
+### 2. View Model Pattern
+View models are classes that prepare and provide data specifically for views, keeping controllers thin and promoting reusability.
+
+**Core Concept:**
+View models encapsulate all logic for preparing view data, avoiding duplication across controllers and maintaining separation of concerns.
+
+**Basic Structure:**
+```php
+<?php
+
+namespace App\ViewModels;
+
+class PostFormViewModel
+{
+    public function __construct(
+        private User $user,
+        private ?Post $post = null,
+    ) {}
+    
+    public function post(): Post
+    {
+        return $this->post ?? new Post();
+    }
+    
+    public function categories(): Collection
+    {
+        return Category::query()
+            ->allowedForUser($this->user)
+            ->get();
+    }
+    
+    public function tags(): Collection
+    {
+        return Tag::query()
+            ->active()
+            ->orderBy('name')
+            ->get();
+    }
+}
+```
+
+**Controller Integration:**
+```php
+class PostsController extends Controller
+{
+    public function create()
+    {
+        $viewModel = new PostFormViewModel(
+            current_user()
+        );
+        
+        return view('blog.form', compact('viewModel'));
+    }
+    
+    public function edit(Post $post)
+    {
+        $viewModel = new PostFormViewModel(
+            current_user(),
+            $post
+        );
+        
+        return view('blog.form', compact('viewModel'));
+    }
+}
+```
+
+**Blade View Usage:**
+```blade
+<form>
+    <input value="{{ $viewModel->post()->title }}" />
+    <textarea>{{ $viewModel->post()->body }}</textarea>
+    
+    <select name="category_id">
+        @foreach($viewModel->categories() as $category)
+            <option value="{{ $category->id }}"
+                @selected($viewModel->post()->category_id === $category->id)>
+                {{ $category->name }}
+            </option>
+        @endforeach
+    </select>
+    
+    <div class="tags">
+        @foreach($viewModel->tags() as $tag)
+            <label>
+                <input type="checkbox" name="tags[]" value="{{ $tag->id }}"
+                    @checked($viewModel->post()->tags->contains($tag->id))>
+                {{ $tag->name }}
+            </label>
+        @endforeach
+    </div>
+</form>
+```
+
+**Laravel Integration Features:**
+
+*Arrayable Implementation:*
+```php
+use Illuminate\Contracts\Support\Arrayable;
+
+class PostFormViewModel implements Arrayable
+{
+    // ... existing methods
+    
+    public function toArray(): array
+    {
+        return [
+            'post' => $this->post(),
+            'categories' => $this->categories(),
+            'tags' => $this->tags(),
+        ];
+    }
+}
+
+// Controller can now pass view model directly
+return view('blog.form', $viewModel);
+
+// Blade can use properties directly
+<input value="{{ $post->title }}" />
+```
+
+*Responsable Implementation:*
+```php
+use Illuminate\Contracts\Support\Responsable;
+use Illuminate\Http\JsonResponse;
+
+class PostFormViewModel implements Responsable
+{
+    // ... existing methods
+    
+    public function toResponse($request): JsonResponse
+    {
+        return response()->json([
+            'post' => PostResource::make($this->post()),
+            'categories' => CategoryResource::collection($this->categories()),
+            'tags' => TagResource::collection($this->tags()),
+        ]);
+    }
+}
+
+// Useful for AJAX form updates
+public function update(Request $request, Post $post): PostFormViewModel
+{
+    // Update the post...
+    
+    return new PostFormViewModel(
+        current_user(),
+        $post,
+    );
+}
+```
+
+**Combined with Resources:**
+```php
+class PostViewModel implements Arrayable, Responsable
+{
+    public function __construct(
+        private Post $post,
+        private User $currentUser
+    ) {}
+    
+    public function values(): array
+    {
+        return PostResource::make($this->post)->resolve();
+    }
+    
+    public function canEdit(): bool
+    {
+        return $this->currentUser->can('update', $this->post);
+    }
+    
+    public function relatedPosts(): Collection
+    {
+        return Post::query()
+            ->where('category_id', $this->post->category_id)
+            ->where('id', '!=', $this->post->id)
+            ->published()
+            ->limit(5)
+            ->get();
+    }
+}
+```
+
+**Key Benefits:**
+- **Reusability**: Same view model works for create/edit/show contexts
+- **Separation of Concerns**: View logic separated from business logic
+- **Testability**: View models can be unit tested independently
+- **DRY Principle**: Eliminates duplication across controllers
+- **Flexibility**: Easy to modify view requirements without touching controllers
+
+**View Model Rules:**
+- Place in `app/ViewModels/` directory
+- Use dependency injection in constructor for all dependencies
+- Methods should return data ready for view consumption
+- Implement `Arrayable` for direct view passing
+- Implement `Responsable` for AJAX responses when needed
+- Combine with Resources for complex data transformation
+- Keep view models focused on single view or view family
+
+### 3. Domain-Driven Organization (DDD)
 Organize related functionality into domain-specific folders within the app directory.
 
 **Domain Structure:**
 ```
 app/
 ├── Actions/
+├── ViewModels/
 ├── Domain/
 │   ├── User/
 │   │   ├── Models/
 │   │   ├── Services/  
 │   │   ├── Actions/
+│   │   ├── ViewModels/
 │   │   └── Enums/
 │   ├── Order/
 │   │   ├── Models/
 │   │   ├── Services/
-│   │   └── Actions/
+│   │   ├── Actions/
+│   │   └── ViewModels/
 │   └── Product/
 │       ├── Models/
-│       └── Services/
+│       ├── Services/
+│       └── ViewModels/
 ├── Http/Controllers/
 ├── Console/Commands/
 └── Shared/
     ├── Services/
+    ├── ViewModels/
     └── Enums/
 ```
 
@@ -136,7 +339,7 @@ app/
 - Shared utilities go in `Shared/`
 - Each domain is self-contained where possible
 
-### 3. DRY Principle (Don't Repeat Yourself)
+### 4. DRY Principle (Don't Repeat Yourself)
 Avoid code duplication through strategic abstraction and reuse.
 
 **Common DRY Patterns:**
@@ -172,7 +375,7 @@ class User extends Model
 }
 ```
 
-### 4. Console Commands as Thin Orchestrators
+### 5. Console Commands as Thin Orchestrators
 Commands should delegate to Actions rather than contain business logic.
 
 ```php
@@ -405,6 +608,7 @@ Choose the structure that fits your project size:
 ```
 app/
 ├── Actions/
+├── ViewModels/
 ├── Models/
 ├── Services/
 ├── Enums/
@@ -415,6 +619,7 @@ app/
 ```
 app/
 ├── Actions/
+├── ViewModels/
 ├── Domain/
 │   ├── User/
 │   ├── Order/
@@ -429,31 +634,35 @@ app/
 ├── Domain/
 │   ├── User/
 │   │   ├── Actions/
+│   │   ├── ViewModels/
 │   │   ├── Models/
 │   │   ├── Services/
 │   │   └── Http/Controllers/
 │   └── Order/
 │       └── [same structure]
 └── Shared/
+    └── ViewModels/
 ```
 
 ## Key Architectural Decisions
 
 1. **Actions over Fat Controllers**: Business logic lives in Actions
-2. **Domain Organization**: Group related functionality together
-3. **DRY Principle**: Eliminate duplication through abstraction
-4. **Enum-Driven Types**: Use enums for type safety and configuration
-5. **Service Classes**: Focused services for specific business areas
-6. **Rich Models**: Models contain domain-specific query methods
+2. **View Models for Data Preparation**: Dedicated classes for view data preparation and reusability
+3. **Domain Organization**: Group related functionality together
+4. **DRY Principle**: Eliminate duplication through abstraction
+5. **Enum-Driven Types**: Use enums for type safety and configuration
+6. **Service Classes**: Focused services for specific business areas
+7. **Rich Models**: Models contain domain-specific query methods
 
 ## When Adding New Features
 
 1. **Identify the Domain** - Which business area does this belong to?
 2. **Create an Action** - Wrap complex operations in Action classes
-3. **Check for DRY Violations** - Can you reuse existing code?
-4. **Use Enums** - Replace magic strings/numbers with type-safe enums
-5. **Keep Controllers Thin** - Controllers should only handle HTTP concerns
-6. **Domain Boundaries** - Minimize dependencies between domains
+3. **Consider View Models** - For views that need data preparation or will be reused across controllers
+4. **Check for DRY Violations** - Can you reuse existing code?
+5. **Use Enums** - Replace magic strings/numbers with type-safe enums
+6. **Keep Controllers Thin** - Controllers should only handle HTTP concerns and delegate to Actions/ViewModels
+7. **Domain Boundaries** - Minimize dependencies between domains
 
 ## Error Handling & Logging
 

@@ -480,4 +480,134 @@ public function execute(): User
 
 Only add extensive logging and error handling when the application complexity demands it.
 
+## Testing Standards
+
+### Testing Framework
+All tests must use **Pest PHP** testing framework instead of PHPUnit.
+
+### Database Testing
+- All tests should refresh the database using `RefreshDatabase` trait
+- Use transactions for test isolation where appropriate
+
+```php
+<?php
+
+uses(RefreshDatabase::class);
+
+it('creates a user successfully', function () {
+    $userData = [
+        'name' => 'John Doe',
+        'email' => 'john@example.com',
+        'password' => 'password123'
+    ];
+    
+    $user = (new CreateUserAction())->execute($userData);
+    
+    expect($user)->toBeInstanceOf(User::class)
+        ->and($user->email)->toBe('john@example.com');
+});
+```
+
+### Factory Usage
+Always create factories for models with realistic, meaningful data:
+
+```php
+<?php
+
+namespace Database\Factories;
+
+use Illuminate\Database\Eloquent\Factories\Factory;
+
+class UserFactory extends Factory
+{
+    public function definition(): array
+    {
+        return [
+            'name' => $this->faker->name(),
+            'email' => $this->faker->unique()->safeEmail(),
+            'email_verified_at' => now(),
+            'password' => bcrypt('password'),
+            'phone' => $this->faker->phoneNumber(),
+            'address' => $this->faker->streetAddress(),
+            'city' => $this->faker->city(),
+            'postal_code' => $this->faker->postcode(),
+            'country' => $this->faker->country(),
+        ];
+    }
+    
+    public function unverified(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'email_verified_at' => null,
+        ]);
+    }
+}
+```
+
+**Factory Rules:**
+- Use realistic data that represents actual use cases
+- Provide state methods for common variations
+- Include all relevant fields, not just required ones
+- Use appropriate faker methods for each field type
+
+## Data Processing & Collections
+
+### Custom Collections
+When working with complex data processing, create custom collections that extend Laravel's base Collection:
+
+```php
+<?php
+
+namespace App\Collections;
+
+use Illuminate\Support\Collection;
+
+class OrderCollection extends Collection
+{
+    public function totalValue(): float
+    {
+        return $this->sum('total_amount');
+    }
+    
+    public function byStatus(OrderStatus $status): static
+    {
+        return $this->filter(fn (Order $order) => $order->status === $status);
+    }
+    
+    public function shipped(): static
+    {
+        return $this->byStatus(OrderStatus::SHIPPED);
+    }
+    
+    public function groupByMonth(): Collection
+    {
+        return $this->groupBy(fn (Order $order) => $order->created_at->format('Y-m'));
+    }
+}
+```
+
+**Custom Collection Rules:**
+- Extend `Illuminate\Support\Collection`
+- Add domain-specific methods that enhance readability
+- Use when data processing becomes complex or repetitive
+- Return appropriate types (`static` for chainable methods, specific types for terminal operations)
+- Prefer descriptive method names over generic operations
+
+**Model Integration:**
+```php
+class Order extends Model
+{
+    public function newCollection(array $models = []): OrderCollection
+    {
+        return new OrderCollection($models);
+    }
+}
+
+// Usage in queries
+$orders = Order::query()->where('status', OrderStatus::PENDING)->get();
+// $orders is now an OrderCollection instance with custom methods
+$shippedOrders = $orders->shipped();
+$totalValue = $orders->totalValue();
+```
+
 This style guide emphasizes maintainability, domain organization, and the DRY principle while staying flexible enough to adapt to different project sizes and requirements.

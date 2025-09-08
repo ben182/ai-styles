@@ -32,11 +32,76 @@ class CreateUserAction
 
 **Key Rules:**
 - Actions live in `app/Actions/`
-- Single responsibility principle (one action, one task)
+- **Single responsibility principle** - Each Action has ONE specific purpose
 - Use dependency injection in constructor
 - Main method is always `execute()`
 - Return meaningful data when needed
 - Actions orchestrate between services/models
+
+**Single Responsibility Examples:**
+
+```php
+// ❌ Bad - Action doing multiple unrelated tasks
+class ProcessUserAction
+{
+    public function execute(User $user): void
+    {
+        // Data retrieval
+        $userData = $this->database->getUserData($user->id);
+        
+        // Data processing 
+        $processedData = $this->processData($userData);
+        
+        // Cleanup operations
+        $this->cleanupOldFiles($user);
+        $this->clearUserCache($user);
+        
+        // Email notification
+        $this->sendNotification($user);
+    }
+}
+
+// ✅ Good - Separate Actions for each responsibility
+class RetrieveUserDataAction
+{
+    public function execute(User $user): array
+    {
+        return $this->database->getUserData($user->id);
+    }
+}
+
+class ProcessUserDataAction  
+{
+    public function execute(array $userData): array
+    {
+        return $this->processData($userData);
+    }
+}
+
+class CleanupUserFilesAction
+{
+    public function execute(User $user): void
+    {
+        $this->cleanupOldFiles($user);
+        $this->clearUserCache($user);
+    }
+}
+
+class SendUserNotificationAction
+{
+    public function execute(User $user): void
+    {
+        $this->sendNotification($user);
+    }
+}
+```
+
+**Why Single Responsibility Matters:**
+- **Testability**: Each Action can be tested in isolation
+- **Reusability**: Individual Actions can be reused in different contexts
+- **Maintainability**: Changes to one responsibility don't affect others
+- **Debugging**: Easier to identify and fix issues in focused code
+- **Composability**: Multiple Actions can be orchestrated together when needed
 
 ### 2. Domain-Driven Organization (DDD)
 Organize related functionality into domain-specific folders within the app directory.

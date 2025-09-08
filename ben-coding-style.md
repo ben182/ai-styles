@@ -196,7 +196,7 @@ $results = $users
 ```
 
 ### Enum-Driven Configuration
-Use enums for type safety and central configuration:
+Use enums for type safety and central configuration instead of arrays or constants:
 
 ```php
 enum OrderStatus: string
@@ -223,6 +223,59 @@ enum OrderStatus: string
             self::CONFIRMED => $status === self::SHIPPED,
             self::SHIPPED => $status === self::DELIVERED,
             self::DELIVERED => false,
+        };
+    }
+}
+
+// ❌ NEVER do this - Arrays for static data are bad
+private array $germanStates = [
+    'BW' => 'Baden-Württemberg',
+    'BY' => 'Bayern',
+    'BE' => 'Berlin',
+    // ...
+];
+
+// ✅ ALWAYS use enums instead
+enum GermanState: string
+{
+    case BADEN_WUERTTEMBERG = 'BW';
+    case BAYERN = 'BY';
+    case BERLIN = 'BE';
+    case BRANDENBURG = 'BB';
+    case BREMEN = 'HB';
+    case HAMBURG = 'HH';
+    case HESSEN = 'HE';
+    case MECKLENBURG_VORPOMMERN = 'MV';
+    case NIEDERSACHSEN = 'NI';
+    case NORDRHEIN_WESTFALEN = 'NW';
+    case RHEINLAND_PFALZ = 'RP';
+    case SAARLAND = 'SL';
+    case SACHSEN = 'SN';
+    case SACHSEN_ANHALT = 'ST';
+    case SCHLESWIG_HOLSTEIN = 'SH';
+    case THUERINGEN = 'TH';
+    case NATIONAL = 'NATIONAL';
+    
+    public function getLabel(): string
+    {
+        return match ($this) {
+            self::BADEN_WUERTTEMBERG => 'Baden-Württemberg',
+            self::BAYERN => 'Bayern',
+            self::BERLIN => 'Berlin',
+            self::BRANDENBURG => 'Brandenburg',
+            self::BREMEN => 'Bremen',
+            self::HAMBURG => 'Hamburg',
+            self::HESSEN => 'Hessen',
+            self::MECKLENBURG_VORPOMMERN => 'Mecklenburg-Vorpommern',
+            self::NIEDERSACHSEN => 'Niedersachsen',
+            self::NORDRHEIN_WESTFALEN => 'Nordrhein-Westfalen',
+            self::RHEINLAND_PFALZ => 'Rheinland-Pfalz',
+            self::SAARLAND => 'Saarland',
+            self::SACHSEN => 'Sachsen',
+            self::SACHSEN_ANHALT => 'Sachsen-Anhalt',
+            self::SCHLESWIG_HOLSTEIN => 'Schleswig-Holstein',
+            self::THUERINGEN => 'Thüringen',
+            self::NATIONAL => 'National',
         };
     }
 }

@@ -126,6 +126,64 @@ class ProcessOrdersCommand extends Command
 
 ## Code Style Conventions
 
+### Variable and Parameter Naming
+Always use descriptive, unambiguous variable and parameter names:
+
+```php
+// ❌ Bad - Abbreviated parameter names
+public function handle(SyncFeiertageAction $action): int
+{
+    return $action->execute();
+}
+
+// ✅ Good - Descriptive parameter names
+public function handle(SyncFeiertageAction $syncFeiertageAction): int
+{
+    return $syncFeiertageAction->execute();
+}
+
+// ❌ Bad - Generic variable names  
+$data = $request->validated();
+$result = $service->process($data);
+
+// ✅ Good - Descriptive variable names
+$validatedUserData = $request->validated();
+$userCreationResult = $service->process($validatedUserData);
+```
+
+**Key Rules:**
+- Parameter names should match or expand on the type name
+- Avoid abbreviations unless they're universally understood
+- Use complete words that clearly describe the variable's purpose
+- Method parameters should be self-documenting
+
+### Eloquent Query Methods
+Always prefix Eloquent methods like `updateOrCreate`, `firstOrCreate`, etc. with `query()` for better IDE autocompletion:
+
+```php
+// ❌ Bad - Missing query() prefix
+$user = User::updateOrCreate(
+    ['email' => $email],
+    ['name' => $name, 'status' => 'active']
+);
+
+$product = Product::firstOrCreate(['sku' => $sku]);
+
+// ✅ Good - Using query() prefix
+$user = User::query()->updateOrCreate(
+    ['email' => $email],
+    ['name' => $name, 'status' => 'active']
+);
+
+$product = Product::query()->firstOrCreate(['sku' => $sku]);
+```
+
+**Benefits:**
+- Better IDE autocompletion and type hints
+- Explicit query builder usage
+- Consistent with complex query chains
+- Easier to extend with additional where clauses
+
 ### Collection Usage Patterns
 Prefer Laravel collections and functional programming:
 

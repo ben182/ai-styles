@@ -17,6 +17,24 @@ mkdir -p "$INSTALL_DIR"
 echo "📥 Downloading ben-coding-style.md..."
 curl -sSL "$REPO_BASE_URL/ben-coding-style.md" -o "$INSTALL_DIR/ben-coding-style.blade.php"
 
+# Fix HTML conflicts for Blade compatibility
+echo "🔧 Fixing HTML conflicts for Blade compatibility..."
+sed -i.bak \
+    -e 's/<!--/{{-- /g' \
+    -e 's/-->/--}}/g' \
+    -e 's/<option value="/\&lt;option value=\&quot;/g' \
+    -e 's/<\/option>/\&lt;\/option\&gt;/g' \
+    -e 's/@selected/@<!-- selected -->/g' \
+    -e 's/@checked/@<!-- checked -->/g' \
+    -e 's/@foreach/@<!-- foreach -->/g' \
+    -e 's/@endforeach/@<!-- endforeach -->/g' \
+    -e 's/{{ /\&lbrace;\&lbrace; /g' \
+    -e 's/ }}/ \&rbrace;\&rbrace;/g' \
+    "$INSTALL_DIR/ben-coding-style.blade.php"
+
+# Clean up backup file
+rm -f "$INSTALL_DIR/ben-coding-style.blade.php.bak"
+
 echo "✅ AI coding guidelines installed to $INSTALL_DIR/"
 echo "🔄 To update, simply run this command again."
 echo ""

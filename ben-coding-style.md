@@ -569,12 +569,261 @@ class PaymentService
 
 ## Database & Model Patterns
 
-### Rich Relationship Methods
-Create descriptive methods for common relationship queries:
+### Models ≠ Business Logic
+Models should focus on data representation and access, not business logic. Laravel provides extensive Eloquent functionality for data operations, but resist adding complex business logic directly to models.
+
+**What NOT to do:**
+```php
+// ❌ Bad - Business logic in model
+class Invoice extends Model
+{
+    public function getTotalPriceAttribute(): int
+    {
+        return $this->invoiceLines
+            ->reduce(
+                fn (int $totalPrice, InvoiceLine $invoiceLine) => 
+                    $totalPrice + $invoiceLine->total_price,
+                0
+            );
+    }
+}
+
+class InvoiceLine extends Model
+{
+    public function getTotalPriceAttribute(): int
+    {
+        $vatCalculator = app(VatCalculator::class);
+        $price = $this->item_amount * $this->item_price;
+        
+        if ($this->price_excluding_vat) {
+            $price = $vatCalculator->totalPrice(
+                $price,
+                $this->vat_percentage,
+            );
+        }
+        
+        return $price;
+    }
+}
+```
+
+**What TO do:**
+```php
+// ✅ Good - Business logic in Actions, models store calculated data
+class CalculateInvoiceTotalAction
+{
+    public function __construct(
+        private VatCalculator $vatCalculator
+    ) {}
+    
+    public function execute(Invoice $invoice): int
+    {
+        $totalPrice = $invoice->invoiceLines
+            ->sum(fn (InvoiceLine $line) => $this->calculateLineTotal($line));
+            
+        // Store the calculated result
+        $invoice->update(['total_price' => $totalPrice]);
+        
+        return $totalPrice;
+    }
+    
+    private function calculateLineTotal(InvoiceLine $line): int
+    {
+        $price = $line->item_amount * $line->item_price;
+        
+        if ($line->price_excluding_vat) {
+            $price = $this->vatCalculator->totalPrice(
+                $price,
+                $line->vat_percentage,
+            );
+        }
+        
+        return $price;
+    }
+}
+
+// Model simply provides access to stored data
+class Invoice extends Model
+{
+    public function total_price(): int
+    {
+        return $this->total_price; // Pre-calculated by Action
+    }
+}
+```
+
+**Benefits of separating business logic:**
+- **Performance**: Calculations performed once, not on every access
+- **Queryability**: Can query calculated data directly in database
+- **Maintainability**: Business logic changes don't affect model structure
+- **Testability**: Business logic can be tested independently
+
+### Scaling Down Models
+Keep models focused on data access by moving other responsibilities to dedicated classes.
+
+**Query Builder Classes:**
+Instead of adding many query scopes to models, create dedicated query builder classes:
+
+```php
+// ✅ Custom Query Builder
+namespace App\Domain\Invoices\QueryBuilders;
+
+use App\Domain\Invoices\Enums\InvoiceStatus;
+use Illuminate\Database\Eloquent\Builder;
+
+class InvoiceQueryBuilder extends Builder
+{
+    public function wherePaid(): self
+    {
+        return $this->whereState('status', InvoiceStatus::PAID);
+    }
+    
+    public function whereOverdue(): self
+    {
+        return $this->where('due_date', '<', now())
+            ->whereNotIn('status', [InvoiceStatus::PAID, InvoiceStatus::CANCELLED]);
+    }
+    
+    public function forDateRange(Carbon $startDate, Carbon $endDate): self
+    {
+        return $this->whereBetween('created_at', [$startDate, $endDate]);
+    }
+}
+
+// Link to model
+class Invoice extends Model
+{
+    public function newEloquentBuilder($query): InvoiceQueryBuilder
+    {
+        return new InvoiceQueryBuilder($query);
+    }
+}
+
+// Usage
+$paidInvoices = Invoice::query()->wherePaid()->get();
+$overdueInvoices = Invoice::query()->whereOverdue()->get();
+```
+
+**Custom Collection Classes:**
+Move complex collection operations to dedicated collection classes:
+
+```php
+// ✅ Custom Collection
+namespace App\Domain\Invoices\Collections;
+
+use Illuminate\Database\Eloquent\Collection;
+
+class InvoiceLineCollection extends Collection
+{
+    public function creditLines(): self
+    {
+        return $this->filter(fn (InvoiceLine $invoiceLine) => 
+            $invoiceLine->isCreditLine()
+        );
+    }
+    
+    public function totalAmount(): int
+    {
+        return $this->sum('total_price');
+    }
+    
+    public function groupByVatRate(): Collection
+    {
+        return $this->groupBy('vat_percentage');
+    }
+}
+
+// Link to model
+class InvoiceLine extends Model
+{
+    public function newCollection(array $models = []): InvoiceLineCollection
+    {
+        return new InvoiceLineCollection($models);
+    }
+    
+    public function isCreditLine(): bool
+    {
+        return $this->price < 0.0;
+    }
+}
+
+// Usage
+$invoice
+    ->invoiceLines
+    ->creditLines()
+    ->map(function (InvoiceLine $invoiceLine) {
+        // ...
+    });
+```
+
+### Event-Driven Models
+For complex business workflows, use dedicated event classes instead of generic model events:
+
+```php
+// ✅ Specific Event Classes
+class InvoiceSavingEvent
+{
+    public function __construct(
+        public Invoice $invoice
+    ) {}
+}
+
+class InvoiceDeletingEvent
+{
+    public function __construct(
+        public Invoice $invoice
+    ) {}
+}
+
+// Model configuration
+class Invoice extends Model
+{
+    protected $dispatchesEvents = [
+        'saving' => InvoiceSavingEvent::class,
+        'deleting' => InvoiceDeletingEvent::class,
+    ];
+}
+
+// Dedicated Event Subscriber
+class InvoiceSubscriber
+{
+    public function __construct(
+        private CalculateInvoiceTotalAction $calculateTotalAction
+    ) {}
+
+    public function saving(InvoiceSavingEvent $event): void
+    {
+        $invoice = $event->invoice;
+        
+        // Business logic handled by Action
+        $invoice->total_price = $this->calculateTotalAction->execute($invoice);
+    }
+
+    public function subscribe(Dispatcher $dispatcher): void
+    {
+        $dispatcher->listen(
+            InvoiceSavingEvent::class,
+            self::class . '@saving'
+        );
+    }
+}
+
+// Register in EventServiceProvider
+class EventServiceProvider extends ServiceProvider
+{
+    protected $subscribe = [
+        InvoiceSubscriber::class,
+    ];
+}
+```
+
+### Rich Model Data Access
+Models should provide rich data access methods while avoiding heavy business logic:
 
 ```php
 class User extends Model 
 {
+    // ✅ Good - Rich relationship methods
     public function activeOrders(): HasMany
     {
         return $this->orders()->where('status', '!=', OrderStatus::CANCELLED);
@@ -583,6 +832,24 @@ class User extends Model
     public function recentOrders(): HasMany
     {
         return $this->orders()->where('created_at', '>=', now()->subDays(30));
+    }
+    
+    // ✅ Good - Simple accessors for presentation
+    public function getFullNameAttribute(): string
+    {
+        return "{$this->first_name} {$this->last_name}";
+    }
+    
+    // ✅ Good - Simple query scopes
+    public function scopeVerified($query)
+    {
+        return $query->whereNotNull('email_verified_at');
+    }
+    
+    // ✅ Good - Data validation/formatting
+    public function setEmailAttribute($value): void
+    {
+        $this->attributes['email'] = strtolower(trim($value));
     }
 }
 ```
@@ -598,6 +865,63 @@ public function products(): BelongsToMany
         ->withTimestamps();
 }
 ```
+
+### Model Architecture Guidelines
+
+**What models SHOULD contain:**
+- Database schema representation (fillable, casts, etc.)
+- Simple accessors and mutators for data formatting
+- Relationship definitions
+- Simple query scopes for data access
+- Data validation rules (when using model validation)
+
+**What models should NOT contain:**
+- Complex business logic calculations
+- External service integrations
+- Complex query building (use Query Builders)
+- Email sending or external API calls
+- File processing or heavy computations
+
+**Model Organization:**
+```php
+class Order extends Model
+{
+    // 1. Model configuration
+    protected $fillable = ['user_id', 'status', 'total_amount'];
+    protected $casts = ['status' => OrderStatus::class];
+    
+    // 2. Relationships
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+    
+    public function items(): HasMany
+    {
+        return $this->hasMany(OrderItem::class);
+    }
+    
+    // 3. Query scopes (simple ones)
+    public function scopePending($query)
+    {
+        return $query->where('status', OrderStatus::PENDING);
+    }
+    
+    // 4. Accessors/Mutators (simple formatting only)
+    public function getFormattedTotalAttribute(): string
+    {
+        return number_format($this->total_amount / 100, 2);
+    }
+    
+    // 5. Custom query builder/collection (when needed)
+    public function newEloquentBuilder($query): OrderQueryBuilder
+    {
+        return new OrderQueryBuilder($query);
+    }
+}
+```
+
+This approach maintains the power of Laravel's Eloquent while keeping models focused, maintainable, and performant. Business logic lives in Actions, complex queries in Query Builders, and collection operations in Custom Collections.
 
 ## File Organization Rules
 

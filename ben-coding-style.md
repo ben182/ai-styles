@@ -392,6 +392,25 @@ class ProcessOrdersCommand extends Command
 }
 ```
 
+### 6. Artisan Call Commands
+When calling Artisan commands programmatically, always use `::class` for better IDE support and refactoring safety:
+
+```php
+// ❌ Bad - String command names
+Artisan::call('ferien:sync', ['--year' => $nextYear]);
+Artisan::call('orders:process');
+
+// ✅ Good - Using ::class for command reference
+Artisan::call(SyncFerienCommand::class, ['--year' => $nextYear]);
+Artisan::call(ProcessOrdersCommand::class);
+```
+
+**Benefits:**
+- Better IDE autocompletion and navigation
+- Safer refactoring when command classes are renamed
+- Type safety and early error detection
+- Clear dependency tracking
+
 ## Code Style Conventions
 
 ### Variable and Parameter Naming
